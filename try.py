@@ -12,9 +12,23 @@ def connect_to_mssql(server, port, database, user, password):
         conn = pyodbc.connect(connection_string)
         print("Connected to the database")
         return conn
+    except pyodbc.InterfaceError as ie:
+        print("Error: Unable to connect to the database. Please check your server and port.")
+        print(f"InterfaceError: {ie}")
+    except pyodbc.DatabaseError as de:
+        print("Error: A database error occurred.")
+        print(f"DatabaseError: {de}")
+    except pyodbc.Error as e:
+        sqlstate = e.args[1]
+        if '28000' in sqlstate:
+            print("Error: Invalid authorization specification. Please check your username and password.")
+        else:
+            print("Error: An error occurred while connecting to the database.")
+            print(f"Error: {e}")
     except Exception as e:
-        print(f"Error connecting to the database: {e}")
-        return None
+        print("An unexpected error occurred.")
+        print(f"Exception: {e}")
+    return None
 
 def get_tables(conn):
     try:
