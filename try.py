@@ -1,4 +1,46 @@
-import pyodbc
+import requests
+from bs4 import BeautifulSoup
+
+# File containing the list of URLs
+url_file = 'urls.txt'
+
+# Proxy configuration
+proxies = {
+    'http': 'http://localhost:8080',
+    'https': 'http://localhost:8080',
+}
+
+def fetch_url_details(url):
+    try:
+        # Make a request through the proxy
+        response = requests.get(url, proxies=proxies, timeout=10)
+        status_code = response.status_code
+        
+        # Parse the HTML to extract the title
+        soup = BeautifulSoup(response.text, 'html.parser')
+        title = soup.title.string.strip() if soup.title else "No title found"
+        
+        return status_code, title
+    except requests.RequestException as e:
+        return None, f"Error: {e}"
+
+def main():
+    with open(url_file, 'r') as file:
+        urls = file.readlines()
+    
+    # Process each URL
+    for url in urls:
+        url = url.strip()  # Remove any extra whitespace
+        if not url:
+            continue
+        status_code, title = fetch_url_details(url)
+        print(f"URL: {url}")
+        print(f"Status Code: {status_code}")
+        print(f"Title: {title}")
+        print('-' * 40)
+
+if __name__ == '__main__':
+    main()import pyodbc
 
 def connect_to_mssql(server, port, database, user, password):
     connection_string = (
